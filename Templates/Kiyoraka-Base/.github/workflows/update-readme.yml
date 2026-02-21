@@ -1,0 +1,79 @@
+name: Update README with GitHub Stats (Pool System)
+
+on:
+  schedule:
+    - cron: '0 23 * * *'  # Runs every 7 am daily UTC +8
+  workflow_dispatch:        # Allows manual trigger
+
+permissions:
+  contents: write          # Needed for pushing changes
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: true
+
+      - name: Create gitignore
+        run: |
+          echo "node_modules/" > .gitignore
+          echo "package-lock.json" >> .gitignore
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+          cache: 'npm'
+
+      - name: Preserve existing pool.json from repository
+        run: |
+          echo "📊 Checking for existing pool.json in repository..."
+          if [ -f pool.json ]; then
+            echo "✅ Found pool.json in repository, using it as base"
+            cp pool.json pool_backup.json
+          else
+            echo "⚠️ No pool.json found in repository"
+          fi
+
+      - name: Restore Pool Cache (Secondary)
+        uses: actions/cache@v3
+        with:
+          path: |
+            github_cache.json
+          key: github-pool-cache-${{ github.repository }}-v4-${{ github.run_id }}
+          restore-keys: |
+            github-pool-cache-${{ github.repository }}-v4-
+
+      - name: Install dependencies
+        run: |
+          npm ci
+
+      - name: Run Pool Stats Script
+        env:
+          PERSONAL_GITHUB_TOKEN: ${{ secrets.PERSONAL_GITHUB_TOKEN }}
+        run: |
+          # Ensure we use the repository's pool.json, not cached one
+          if [ -f pool_backup.json ] && [ ! -f pool.json ]; then
+            echo "🔄 Restoring pool.json from repository backup"
+            cp pool_backup.json pool.json
+          fi
+          node pool.js
+
+      - name: Save Pool Cache
+        uses: actions/cache/save@v3
+        if: always()
+        with:
+          path: |
+            github_cache.json
+          key: github-pool-cache-${{ github.repository }}-v4-${{ github.run_id }}
+
+      - name: Commit and Push Changes
+        run: |
+          git config --local user.name "github-actions[bot]"
+          git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f README.md pool.json
+          git commit -m "Update README stats (Pool System)" || echo "No changes to commit"
+          git push origin HEAD || echo "No changes to push"
